@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>ArcGIS Search & Intersection Query Example</title>
+    <!-- ArcGIS API for JavaScript CSS (v4.31) -->
+    <link rel="stylesheet" href="https://js.arcgis.com/4.31/esri/themes/light/main.css">
+    <style>
+      html, body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      /* Banner styling: bold text */
+      #banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: #0079c1;
+        color: #fff;
+        padding: 10px;
+        font-size: 18px;
+        text-align: center;
+        z-index: 9999;
+        font-weight: bold;
+      }
+      /* Leave some space at the top so the map isn't hidden under the banner */
+      #viewDiv {
+        height: 100%;
+        width: 100%;
+        margin-top: 50px;
+      }
+      /* Splash Screen styling */
+      #splash {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.95);
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        font-size: 24px;
+        color: #333;
+        text-align: center;
+      }
+      #splash button {
+        margin-top: 20px;
+        padding: 10px 20px;
+        font-size: 18px;
+        cursor: pointer;
+      }
+      /* Custom Modal (alert) styling */
+      #customAlert {
+        display: none; /* Hidden by default */
+        position: fixed;
+        z-index: 11000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0,0,0,0.4);
+      }
+      #customAlert .modal-content {
+        background-color: #fefefe;
+        margin: 15% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 300px;
+        text-align: center;
+        border-radius: 4px;
+      }
+      #customAlert .modal-header {
+        font-size: 20px;
+        margin-bottom: 10px;
+      }
+      #customAlert .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      #customAlert .close:hover,
+      #customAlert .close:focus {
+        color: black;
+      }
+      #customAlert button {
+        padding: 8px 16px;
+        margin-top: 10px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+    </style>
+    <!-- Load ArcGIS API for JavaScript (v4.31) -->
+    <script src="https://js.arcgis.com/4.31/"></script>
+  </head>
+  <body>
+    <!-- Banner element -->
+    <div id="banner">
+      Roller Service Interruption. Group Number: <strong>N/A</strong>
+    </div>
+    
+    <!-- Splash Screen -->
+    <div id="splash">
+      <p>Welcome! Please search for an address or click on the map to begin.</p>
+      <button id="splashClose">Continue</button>
+    </div>
+    
+    <!-- Map container -->
+    <div id="viewDiv"></div>
+    
+    <!-- Custom Alert Modal -->
+    <div id="customAlert">
+      <div class="modal-content">
+        <span class="close" id="alertClose">&times;</span>
+        <div class="modal-header" id="alertHeader">Alert</div>
+        <div id="alertMessage">RSI 0 detected!</div>
+        <button id="alertButton">OK</button>
+      </div>
+    </div>
+    
+    <script>
+      require([
+        "esri/Map",
+        "esri/Graphic",
+        "esri/request",
+        "esri/views/MapView",
+        "esri/widgets/Search",
+        "esri/widgets/Search/SearchSource",
+        "esri/geometry/geometryEngine",
+        "esri/geometry/Point"
+      ], function(Map, Graphic, esriRequest, MapView, Search, SearchSource, geometryEngine, Point) {
+        
+        console.log("Modules loaded successfully.");
+        
+        // Create a basic map with a basemap.
+        var map = new Map({
+          basemap: "streets-navigation-vector"
+        });
+        
+        // Initialize the MapView centered on Alaska.
+        var view = new MapView({
+          container: "viewDiv",
+          map: map,
+          center: [-150, 64], // Approximate center for Alaska.
+          zoom: 4
+        });
+        
+        // Function to hide the splash screen.
+        function hideSplash() {
+          var splash = document.getElementById("splash");
+          if (splash && splash.style.display !== "none") {
+            splash.style.display = "none";
+          }
+        }
+        
+        // Dismiss splash when the "Continue" button is clicked.
+        document.getElementById("splashClose").addEventListener("click", hideSplash);
+        
+        // Also hide splash on first map click.
+        view.on("click", function(event) {
+          hideSplash();
+          doQuery(event.mapPoint);
+        });
+        
+        // Create a custom SearchSource to restrict geocoding to Alaska.
+        // Updated locator URL is used here.
+        var alaskaSearchSource = new SearchSource({
+          locator: {
+            url: "https://utility.arcgis.com/usrsvcs/servers/c1db6946eb3942cab38ab0d94de925c1/rest/services/World/GeocodeServer"
+          },
+          placeholder: "Enter Alaska address...",
+          singleLineFieldName: "SingleLine",
+          outFields: ["Addr_type"],
+          // Define an extent roughly covering Alaska.
+          searchExtent: {
+            xmin: -170,
+            ymin: 50,
+            xmax: -130,
+            ymax: 72,
+            spatialReference: { wkid: 4326 }
+          }
+        });
+        
+        // Create the Search widget with the custom search source.
+        var searchWidget = new Search({
+          view: view,
+          sources: [alaskaSearchSource]
+        });
+        view.ui.add(searchWidget, "top-right");
+        
+        // Also hide splash on a search result.
+        searchWidget.on("select-result", function(event) {
+          hideSplash();
+          var resultPoint = event.result.feature.geometry;
+          doQuery(resultPoint);
+        });
+        
+        // Function to update the banner.
+        function updateBanner(rsiNum) {
+          var banner = document.getElementById("banner");
+          if (rsiNum !== undefined && rsiNum !== null) {
+            banner.innerHTML = "Roller Service Interruption. Group Number: <strong>" + rsiNum + "</strong>";
+          } else {
+            banner.innerHTML = "Roller Service Interruption. Group Number: <strong>N/A</strong>";
+          }
+        }
+        
+        // Custom Alert Modal functions.
+        function showCustomAlert(header, message) {
+          document.getElementById("alertHeader").innerText = header;
+          document.getElementById("alertMessage").innerText = message;
+          document.getElementById("customAlert").style.display = "block";
+        }
+        function hideCustomAlert() {
+          document.getElementById("customAlert").style.display = "none";
+        }
+        document.getElementById("alertClose").addEventListener("click", hideCustomAlert);
+        document.getElementById("alertButton").addEventListener("click", hideCustomAlert);
+        
+        // Function to perform the spatial query using esri/request.
+        function doQuery(point) {
+          // Clear any existing graphics.
+          view.graphics.removeAll();
+          
+          // Add a red marker at the selected point.
+          var marker = new Graphic({
+            geometry: point,
+            symbol: {
+              type: "simple-marker",
+              color: "red",
+              size: "12px",
+              outline: { color: "white", width: 1 }
+            }
+          });
+          view.graphics.add(marker);
+          
+          // Use the confirmed working URL for the query.
+          var queryUrl = "https://services6.arcgis.com/sw0FvRF8CJGXdqpY/ArcGIS/rest/services/RSI_Groups/FeatureServer/6/query";
+          
+          // Set up query parameters.
+          var queryParams = {
+            f: "json",
+            where: "1=1", // Ensures that all features are considered.
+            geometry: JSON.stringify(point.toJSON()),
+            geometryType: "esriGeometryPoint",
+            inSR: 4326,
+            spatialRel: "esriSpatialRelIntersects",
+            outFields: "*", // Request all fields for inspection.
+            returnGeometry: false
+          };
+          
+          // Send the query request.
+          esriRequest(queryUrl, {
+            query: queryParams,
+            responseType: "json"
+          }).then(function(response) {
+            var result = response.data;
+            console.log("Query result:", result);
+            if (result.features && result.features.length > 0) {
+              // Log attributes to inspect what fields are returned.
+              console.log("First feature attributes:", result.features[0].attributes);
+              // Attempt to retrieve RSI_Num from the first feature.
+              var rsiNum = result.features[0].attributes.RSI_Num;
+              updateBanner(rsiNum);
+              // If RSI_Num is 0, show the custom alert.
+              if (rsiNum === 0) {
+                showCustomAlert("Note", "This address is not participating in MEA Rolling Service Interruptions.");
+              }
+            } else {
+              updateBanner(null);
+            }
+          }).catch(function(error) {
+            console.error("Query error:", error);
+            updateBanner(null);
+          });
+        }
+        
+      });
+    </script>
+  </body>
+</html>
