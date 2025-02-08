@@ -35,10 +35,10 @@
       /* Splash Screen styling */
       #splash {
         position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
+        top: 25%;
+        left: 25%;
+        width: 50%;
+        height: 50%;
         background: rgba(255, 255, 255, 0.95);
         z-index: 10000;
         display: flex;
@@ -104,12 +104,17 @@
   <body>
     <!-- Banner element -->
     <div id="banner">
-      Roller Service Interruption. Group Number: <strong>N/A</strong>
+      Rolling Service Interruption. Group Number: <strong>N/A</strong>
     </div>
     
     <!-- Splash Screen -->
     <div id="splash">
-      <p>Welcome! Please search for an address or click on the map to begin.</p>
+      <p>
+        Matanuska Electric Association<br>
+        Rolling Service Interuption Group Lookup.
+        <br><br>
+        Please search for an address or click on the map to find your Group Number.
+      </p>
       <button id="splashClose">Continue</button>
     </div>
     
@@ -133,10 +138,9 @@
         "esri/request",
         "esri/views/MapView",
         "esri/widgets/Search",
-        "esri/widgets/Search/SearchSource",
-        "esri/geometry/geometryEngine",
+        "esri/geometry/Extent",
         "esri/geometry/Point"
-      ], function(Map, Graphic, esriRequest, MapView, Search, SearchSource, geometryEngine, Point) {
+      ], function(Map, Graphic, esriRequest, MapView, Search, Extent, Point) {
         
         console.log("Modules loaded successfully.");
         
@@ -149,8 +153,17 @@
         var view = new MapView({
           container: "viewDiv",
           map: map,
-          center: [-150, 64], // Approximate center for Alaska.
-          zoom: 4
+          center: [-149.5, 61.65], // Approximate center for Alaska.
+          zoom: 8
+        });
+        
+        // Define an extent covering Alaska.
+        var alaskaExtent = new Extent({
+          xmin: -170,
+          ymin: 50,
+          xmax: -130,
+          ymax: 72,
+          spatialReference: { wkid: 4326 }
         });
         
         // Function to hide the splash screen.
@@ -170,47 +183,33 @@
           doQuery(event.mapPoint);
         });
         
-        // Create a custom SearchSource to restrict geocoding to Alaska.
-        // Updated locator URL is used here.
-        var alaskaSearchSource = new SearchSource({
-          locator: {
-            url: "https://utility.arcgis.com/usrsvcs/servers/c1db6946eb3942cab38ab0d94de925c1/rest/services/World/GeocodeServer"
-          },
-          placeholder: "Enter Alaska address...",
-          singleLineFieldName: "SingleLine",
-          outFields: ["Addr_type"],
-          // Define an extent roughly covering Alaska.
-          searchExtent: {
-            xmin: -170,
-            ymin: 50,
-            xmax: -130,
-            ymax: 72,
-            spatialReference: { wkid: 4326 }
-          }
-        });
-        
-        // Create the Search widget with the custom search source.
+        // Create the default Search widget with popup disabled
+        // and with a searchExtent set to Alaska.
         var searchWidget = new Search({
           view: view,
-          sources: [alaskaSearchSource]
+          popupEnabled: false,
+          searchExtent: alaskaExtent
+          sug
         });
         view.ui.add(searchWidget, "top-right");
         
-        // Also hide splash on a search result.
+        // Hide splash on a search result.
         searchWidget.on("select-result", function(event) {
           hideSplash();
           var resultPoint = event.result.feature.geometry;
-          doQuery(resultPoint);
+          // Capture the selected address (display value)
+          var selectedAddress = event.result.name;
+          doQuery(resultPoint, selectedAddress);
         });
         
-        // Function to update the banner.
-        function updateBanner(rsiNum) {
+        // Function to update the banner with RSI number and optional selected address as a subtitle.
+        function updateBanner(rsiNum, selectedAddress) {
           var banner = document.getElementById("banner");
-          if (rsiNum !== undefined && rsiNum !== null) {
-            banner.innerHTML = "Roller Service Interruption. Group Number: <strong>" + rsiNum + "</strong>";
-          } else {
-            banner.innerHTML = "Roller Service Interruption. Group Number: <strong>N/A</strong>";
-          }
+          var rsiText = (rsiNum !== undefined && rsiNum !== null) ? "<strong>" + rsiNum + "</strong>" : "<strong>N/A</strong>";
+          var subtitle = (selectedAddress !== undefined && selectedAddress !== null)
+            ? "<div style='font-size:14px; font-weight:normal;'>" + selectedAddress + "</div>"
+            : "";
+          banner.innerHTML = "Roller Service Interruption. Group Number: " + rsiText + subtitle;
         }
         
         // Custom Alert Modal functions.
@@ -226,7 +225,8 @@
         document.getElementById("alertButton").addEventListener("click", hideCustomAlert);
         
         // Function to perform the spatial query using esri/request.
-        function doQuery(point) {
+        // Accepts an optional "selectedAddress" parameter.
+        function doQuery(point, selectedAddress) {
           // Clear any existing graphics.
           view.graphics.removeAll();
           
@@ -269,17 +269,17 @@
               console.log("First feature attributes:", result.features[0].attributes);
               // Attempt to retrieve RSI_Num from the first feature.
               var rsiNum = result.features[0].attributes.RSI_Num;
-              updateBanner(rsiNum);
+              updateBanner(rsiNum, selectedAddress);
               // If RSI_Num is 0, show the custom alert.
               if (rsiNum === 0) {
                 showCustomAlert("Note", "This address is not participating in MEA Rolling Service Interruptions.");
               }
             } else {
-              updateBanner(null);
+              updateBanner(null, selectedAddress);
             }
           }).catch(function(error) {
             console.error("Query error:", error);
-            updateBanner(null);
+            updateBanner(null, selectedAddress);
           });
         }
         
