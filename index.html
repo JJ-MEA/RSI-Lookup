@@ -12,25 +12,25 @@
         margin: 0;
         padding: 0;
       }
+      /* Use a flex layout so the banner stays fixed at the top and the map fills the rest of the screen */
+      body {
+        display: flex;
+        flex-direction: column;
+      }
       /* Banner styling: bold text */
       #banner {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
+        flex: 0 0 auto;
         background: #0079c1;
         color: #fff;
         padding: 10px;
         font-size: 18px;
         text-align: center;
-        z-index: 9999;
         font-weight: bold;
-      }
-      /* Leave some space at the top so the map isn't hidden under the banner */
-      #viewDiv {
-        height: 100%;
         width: 100%;
-        margin-top: 50px;
+      }
+      /* Map container fills the remaining space */
+      #viewDiv {
+        flex: 1 1 auto;
       }
       /* Splash Screen styling */
       #splash {
@@ -57,7 +57,7 @@
       }
       /* Custom Modal (alert) styling */
       #customAlert {
-        display: none; /* Hidden by default */
+        display: none;
         position: fixed;
         z-index: 11000;
         left: 0;
@@ -97,14 +97,23 @@
         font-size: 16px;
         cursor: pointer;
       }
+      /* Mobile: Make the splash screen square based on the smallest screen dimension */
+      @media only screen and (max-width: 600px) {
+        #splash {
+          width: 80vw;
+          height: 80vw;
+          top: calc(50% - 40vw);
+          left: calc(50% - 40vw);
+        }
+      }
     </style>
     <!-- Load ArcGIS API for JavaScript (v4.31) -->
     <script src="https://js.arcgis.com/4.31/"></script>
   </head>
   <body>
-    <!-- Banner element -->
+    <!-- Banner element with default text prompting user selection -->
     <div id="banner">
-      Rolling Service Interruption. Group Number: <strong>N/A</strong>
+      Rolling Service Interruption. Group Number: <strong>Select address</strong>
     </div>
     
     <!-- Splash Screen -->
@@ -153,7 +162,7 @@
         var view = new MapView({
           container: "viewDiv",
           map: map,
-          center: [-149.5, 61.65], // Approximate center for Alaska.
+          center: [-149.5, 61.65],
           zoom: 8
         });
         
@@ -174,7 +183,7 @@
           }
         }
         
-        // Dismiss splash when the "Continue" button is clicked.
+        // Dismiss splash on "Continue" button click.
         document.getElementById("splashClose").addEventListener("click", hideSplash);
         
         // Also hide splash on first map click.
@@ -183,14 +192,30 @@
           doQuery(event.mapPoint);
         });
         
-        // Create the default Search widget with popup disabled
-        // and with a searchExtent set to Alaska.
+        // Create the default Search widget with popup disabled and Alaska search extent.
         var searchWidget = new Search({
           view: view,
           popupEnabled: false,
           searchExtent: alaskaExtent
         });
         view.ui.add(searchWidget, "top-right");
+        
+        // Filter suggestion results so that only those with an extent that falls within Alaska are kept.
+        searchWidget.on("suggest-results", function(event) {
+          event.results = event.results.filter(function(result) {
+            if (result.extent) {
+              var ext = result.extent;
+              var centerX = (ext.xmin + ext.xmax) / 2;
+              var centerY = (ext.ymin + ext.ymax) / 2;
+              return (centerX >= alaskaExtent.xmin &&
+                      centerX <= alaskaExtent.xmax &&
+                      centerY >= alaskaExtent.ymin &&
+                      centerY <= alaskaExtent.ymax);
+            }
+            // If no extent is provided, filter out the suggestion.
+            return false;
+          });
+        });
         
         // Hide splash on a search result.
         searchWidget.on("select-result", function(event) {
@@ -201,10 +226,10 @@
           doQuery(resultPoint, selectedAddress);
         });
         
-        // Function to update the banner with RSI number and optional selected address as a subtitle.
+        // Function to update the banner with RSI number and optional selected address.
         function updateBanner(rsiNum, selectedAddress) {
           var banner = document.getElementById("banner");
-          var rsiText = (rsiNum !== undefined && rsiNum !== null) ? "<strong>" + rsiNum + "</strong>" : "<strong>N/A</strong>";
+          var rsiText = (rsiNum !== undefined && rsiNum !== null) ? "<strong>" + rsiNum + "</strong>" : "<strong>Select address</strong>";
           var subtitle = (selectedAddress !== undefined && selectedAddress !== null)
             ? "<div style='font-size:14px; font-weight:normal;'>" + selectedAddress + "</div>"
             : "";
@@ -247,12 +272,12 @@
           // Set up query parameters.
           var queryParams = {
             f: "json",
-            where: "1=1", // Ensures that all features are considered.
+            where: "1=1",
             geometry: JSON.stringify(point.toJSON()),
             geometryType: "esriGeometryPoint",
             inSR: 4326,
             spatialRel: "esriSpatialRelIntersects",
-            outFields: "*", // Request all fields for inspection.
+            outFields: "*",
             returnGeometry: false
           };
           
@@ -264,12 +289,9 @@
             var result = response.data;
             console.log("Query result:", result);
             if (result.features && result.features.length > 0) {
-              // Log attributes to inspect what fields are returned.
               console.log("First feature attributes:", result.features[0].attributes);
-              // Attempt to retrieve RSI_Num from the first feature.
               var rsiNum = result.features[0].attributes.RSI_Num;
               updateBanner(rsiNum, selectedAddress);
-              // If RSI_Num is 0, show the custom alert.
               if (rsiNum === 0) {
                 showCustomAlert("Note", "This address is not participating in MEA Rolling Service Interruptions.");
               }
