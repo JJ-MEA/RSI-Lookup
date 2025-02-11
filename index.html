@@ -12,7 +12,7 @@
         margin: 0;
         padding: 0;
       }
-      /* Use a flex layout so the banner stays fixed at the top and the map fills the rest of the screen */
+      /* Use a flex layout so the banner stays fixed at the top and the map fills the remaining space */
       body {
         display: flex;
         flex-direction: column;
@@ -111,7 +111,7 @@
     <script src="https://js.arcgis.com/4.31/"></script>
   </head>
   <body>
-    <!-- Banner element with default text prompting user selection -->
+    <!-- Banner element with default prompt text -->
     <div id="banner">
       Rolling Service Interruption. Group Number: <strong>Select address</strong>
     </div>
@@ -147,13 +147,14 @@
         "esri/request",
         "esri/views/MapView",
         "esri/widgets/Search",
+        "esri/widgets/BasemapToggle",
         "esri/geometry/Extent",
         "esri/geometry/Point"
-      ], function(Map, Graphic, esriRequest, MapView, Search, Extent, Point) {
+      ], function(Map, Graphic, esriRequest, MapView, Search, BasemapToggle, Extent, Point) {
         
         console.log("Modules loaded successfully.");
         
-        // Create a basic map with a basemap.
+        // Create a basic map with a default basemap.
         var map = new Map({
           basemap: "streets-navigation-vector"
         });
@@ -165,6 +166,13 @@
           center: [-149.5, 61.65],
           zoom: 8
         });
+        
+        // Add a BasemapToggle widget that toggles to the satellite basemap.
+        var basemapToggle = new BasemapToggle({
+          view: view,
+          nextBasemap: "satellite"
+        });
+        view.ui.add(basemapToggle, "bottom-right");
         
         // Define an extent covering Alaska.
         var alaskaExtent = new Extent({
@@ -183,7 +191,7 @@
           }
         }
         
-        // Dismiss splash on "Continue" button click.
+        // Dismiss splash when the "Continue" button is clicked.
         document.getElementById("splashClose").addEventListener("click", hideSplash);
         
         // Also hide splash on first map click.
@@ -192,7 +200,8 @@
           doQuery(event.mapPoint);
         });
         
-        // Create the default Search widget with popup disabled and Alaska search extent.
+        // Create the default Search widget using its default sources.
+        // We set popupEnabled to false and use searchExtent to bias the search.
         var searchWidget = new Search({
           view: view,
           popupEnabled: false,
@@ -200,9 +209,12 @@
         });
         view.ui.add(searchWidget, "top-right");
         
-        // Filter suggestion results so that only those with an extent that falls within Alaska are kept.
+        // Filter suggestion results so that only suggestions likely from Alaska remain.
         searchWidget.on("suggest-results", function(event) {
           event.results = event.results.filter(function(result) {
+            // Use result.text if available; fallback to result.name.
+            var suggestionText = result.text || result.name || "";
+            // If the suggestion has an extent, check its center.
             if (result.extent) {
               var ext = result.extent;
               var centerX = (ext.xmin + ext.xmax) / 2;
@@ -212,24 +224,25 @@
                       centerY >= alaskaExtent.ymin &&
                       centerY <= alaskaExtent.ymax);
             }
-            // If no extent is provided, filter out the suggestion.
-            return false;
+            // Otherwise, allow the suggestion if its text contains ", ak"
+            return suggestionText.toLowerCase().indexOf(", ak") !== -1;
           });
         });
         
-        // Hide splash on a search result.
+        // When a search result is selected, hide the splash and perform the spatial query.
         searchWidget.on("select-result", function(event) {
           hideSplash();
           var resultPoint = event.result.feature.geometry;
-          // Capture the selected address (display value)
-          var selectedAddress = event.result.name;
+          var selectedAddress = event.result.name;  // Using the display value.
           doQuery(resultPoint, selectedAddress);
         });
         
-        // Function to update the banner with RSI number and optional selected address.
+        // Function to update the banner with RSI number and an optional selected address subtitle.
         function updateBanner(rsiNum, selectedAddress) {
           var banner = document.getElementById("banner");
-          var rsiText = (rsiNum !== undefined && rsiNum !== null) ? "<strong>" + rsiNum + "</strong>" : "<strong>Select address</strong>";
+          var rsiText = (rsiNum !== undefined && rsiNum !== null) 
+                          ? "<strong>" + rsiNum + "</strong>" 
+                          : "<strong>Select address</strong>";
           var subtitle = (selectedAddress !== undefined && selectedAddress !== null)
             ? "<div style='font-size:14px; font-weight:normal;'>" + selectedAddress + "</div>"
             : "";
@@ -266,7 +279,7 @@
           });
           view.graphics.add(marker);
           
-          // Use the confirmed working URL for the query.
+          // URL for the RSI Groups query.
           var queryUrl = "https://services6.arcgis.com/sw0FvRF8CJGXdqpY/ArcGIS/rest/services/RSI_Groups/FeatureServer/6/query";
           
           // Set up query parameters.
@@ -281,7 +294,7 @@
             returnGeometry: false
           };
           
-          // Send the query request.
+          // Execute the spatial query.
           esriRequest(queryUrl, {
             query: queryParams,
             responseType: "json"
